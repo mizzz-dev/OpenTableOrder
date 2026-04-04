@@ -12,5 +12,9 @@ export interface BusinessDashboardResponse {
 
 export interface BusinessDashboardQuery {
   storeId: string;
-  date: string;
+  date?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  days?: number;
+  timezone?: string;
 }

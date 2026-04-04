@@ -8,9 +8,9 @@ export class BusinessDashboardController {
   constructor(private readonly businessDashboardService: BusinessDashboardService) {}
 
   @Get('hourly-seat-occupancy')
-  getHourlySeatOccupancy(
+  async getHourlySeatOccupancy(
     @Query() query: BusinessDashboardQueryDto,
-  ): BusinessDashboardResponse {
+  ): Promise<BusinessDashboardResponse> {
     return this.businessDashboardService.getDashboard(query);
   }
 }

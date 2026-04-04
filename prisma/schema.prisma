@@ -31,7 +31,7 @@ model TableSession {
   id           String    @id @default(cuid())
   tableId      String
   storeId      String
-  seatedAt     DateTime
+  seatedAt     DateTime?
   checkedOutAt DateTime?
   closedAt     DateTime?
   createdAt    DateTime  @default(now())

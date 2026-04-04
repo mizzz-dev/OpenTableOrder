@@ -7,6 +7,7 @@ export default function BusinessDashboardPage(): JSX.Element {
   const { data, isLoading, errorMessage } = useBusinessDashboard({
     storeId: 'store-001',
     date: '2026-04-04',
+    timezone: 'Asia/Tokyo',
   });
 
   if (isLoading) {
