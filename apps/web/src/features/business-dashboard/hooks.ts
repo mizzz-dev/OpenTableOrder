@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { fetchBusinessDashboard } from './api';
 import {
   BusinessDashboardQuery,
@@ -17,6 +17,19 @@ export function useBusinessDashboard(
   const [data, setData] = useState<BusinessDashboardResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const queryKey = useMemo(
+    () =>
+      JSON.stringify({
+        storeId: query.storeId,
+        date: query.date,
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+        days: query.days,
+        timezone: query.timezone,
+      }),
+    [query.date, query.dateFrom, query.dateTo, query.days, query.storeId, query.timezone],
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -48,7 +61,7 @@ export function useBusinessDashboard(
     return () => {
       isActive = false;
     };
-  }, [query.date, query.storeId]);
+  }, [query, queryKey]);
 
   return { data, isLoading, errorMessage };
 }

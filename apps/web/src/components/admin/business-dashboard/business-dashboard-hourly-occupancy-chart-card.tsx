@@ -18,7 +18,7 @@ export function BusinessDashboardHourlyOccupancyChartCard({
         {data.map((item) => (
           <li key={item.label}>
             <strong>{item.label}</strong> - 稼働分: {item.occupancyMinutes} / 稼働率:{' '}
-            {(item.seatOccupancyRate * 100).toFixed(1)}%
+            {item.seatOccupancyRate.toFixed(1)}%
           </li>
         ))}
       </ul>
