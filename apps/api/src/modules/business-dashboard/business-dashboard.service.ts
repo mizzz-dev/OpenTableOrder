@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   BusinessDashboardResponse,
+  HourlyAverageTicketSize,
   HourlySeatOccupancy,
   OperationsKpi,
 } from '../../../../../packages/shared/src/business-dashboard';
@@ -26,13 +27,23 @@ interface DashboardSession {
   closedAt: Date | null;
 }
 
+interface TicketPayment {
+  amount: number;
+  createdAt: Date;
+}
+
+interface TicketGuestSession {
+  guestCount: number | null;
+  seatedAt: Date | null;
+}
+
 @Injectable()
 export class BusinessDashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getDashboard(query: BusinessDashboardQueryDto): Promise<BusinessDashboardResponse> {
     const period = this.resolvePeriod(query);
-    const [totalSeats, totalTables, sessions] = await Promise.all([
+    const [totalSeats, totalTables, sessions, payments, guestSessions] = await Promise.all([
       this.getTotalSeats(query.storeId),
       this.getTotalTables(query.storeId),
       this.prisma.tableSession.findMany({
@@ -48,6 +59,35 @@ export class BusinessDashboardService {
           seatedAt: true,
           checkedOutAt: true,
           closedAt: true,
+        },
+      }),
+      this.prisma.payment.findMany({
+        where: {
+          storeId: query.storeId,
+          status: 'CAPTURED',
+          createdAt: {
+            gte: period.startUtc,
+            lt: period.endUtc,
+          },
+        },
+        select: {
+          amount: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.tableSession.findMany({
+        where: {
+          storeId: query.storeId,
+          guestCount: { not: null },
+          seatedAt: {
+            not: null,
+            gte: period.startUtc,
+            lt: period.endUtc,
+          },
+        },
+        select: {
+          guestCount: true,
+          seatedAt: true,
         },
       }),
     ]);
@@ -88,6 +128,11 @@ export class BusinessDashboardService {
       date: period.dateFrom,
       hourlySeatOccupancyRate,
       operationsKpi: this.calculateOperationsKpi(sessions, period, totalTables),
+      hourlyAverageTicketSize: this.calculateHourlyAverageTicketSize(
+        payments,
+        guestSessions,
+        period.timezone,
+      ),
     };
   }
 
@@ -142,6 +187,44 @@ export class BusinessDashboardService {
       averageStayMinutes: this.roundToTwoDecimals(averageStayMinutes),
       tableTurnoverRate: this.roundToTwoDecimals(tableTurnoverRate),
     };
+  }
+
+  private calculateHourlyAverageTicketSize(
+    payments: TicketPayment[],
+    guestSessions: TicketGuestSession[],
+    timezone: string,
+  ): HourlyAverageTicketSize[] {
+    const salesBuckets = this.createHourlyBuckets();
+    const guestBuckets = this.createHourlyBuckets();
+
+    for (const payment of payments) {
+      const label = this.getHourLabel(payment.createdAt, timezone);
+      salesBuckets[label] += payment.amount;
+    }
+
+    for (const session of guestSessions) {
+      if (session.seatedAt === null || session.guestCount === null) {
+        continue;
+      }
+
+      const label = this.getHourLabel(session.seatedAt, timezone);
+      guestBuckets[label] += session.guestCount;
+    }
+
+    return Object.keys(salesBuckets).map(
+      (label): HourlyAverageTicketSize => {
+        const sales = salesBuckets[label] ?? 0;
+        const guests = guestBuckets[label] ?? 0;
+        const averageTicketSize = guests === 0 ? 0 : sales / guests;
+
+        return {
+          label,
+          sales: this.roundToTwoDecimals(sales),
+          guests,
+          averageTicketSize: this.roundToTwoDecimals(averageTicketSize),
+        };
+      },
+    );
   }
 
   private toSessionRange(
