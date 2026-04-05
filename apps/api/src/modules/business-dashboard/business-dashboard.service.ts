@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   BusinessDashboardResponse,
   HourlySeatOccupancy,
+  OperationsKpi,
 } from '../../../../../packages/shared/src/business-dashboard';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BusinessDashboardQueryDto } from './dto/business-dashboard-query.dto';
@@ -19,31 +20,39 @@ interface SessionRange {
   end: Date;
 }
 
+interface DashboardSession {
+  seatedAt: Date | null;
+  checkedOutAt: Date | null;
+  closedAt: Date | null;
+}
+
 @Injectable()
 export class BusinessDashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getDashboard(query: BusinessDashboardQueryDto): Promise<BusinessDashboardResponse> {
     const period = this.resolvePeriod(query);
-    const totalSeats = await this.getTotalSeats(query.storeId);
+    const [totalSeats, totalTables, sessions] = await Promise.all([
+      this.getTotalSeats(query.storeId),
+      this.getTotalTables(query.storeId),
+      this.prisma.tableSession.findMany({
+        where: {
+          storeId: query.storeId,
+          seatedAt: { not: null, lt: period.endUtc },
+          OR: [
+            { checkedOutAt: { gt: period.startUtc } },
+            { closedAt: { gt: period.startUtc } },
+          ],
+        },
+        select: {
+          seatedAt: true,
+          checkedOutAt: true,
+          closedAt: true,
+        },
+      }),
+    ]);
     const buckets = this.createHourlyBuckets();
     const hourOccurrences = this.createHourlyBuckets(0);
-
-    const sessions = await this.prisma.tableSession.findMany({
-      where: {
-        storeId: query.storeId,
-        seatedAt: { not: null, lt: period.endUtc },
-        OR: [
-          { checkedOutAt: { gt: period.startUtc } },
-          { closedAt: { gt: period.startUtc } },
-        ],
-      },
-      select: {
-        seatedAt: true,
-        checkedOutAt: true,
-        closedAt: true,
-      },
-    });
 
     this.accumulateHourOccurrences(period, hourOccurrences);
 
@@ -78,6 +87,7 @@ export class BusinessDashboardService {
       storeId: query.storeId,
       date: period.dateFrom,
       hourlySeatOccupancyRate,
+      operationsKpi: this.calculateOperationsKpi(sessions, period, totalTables),
     };
   }
 
@@ -90,6 +100,50 @@ export class BusinessDashboardService {
     return aggregate._sum.seatCapacity ?? 0;
   }
 
+  private async getTotalTables(storeId: string): Promise<number> {
+    return this.prisma.table.count({
+      where: { storeId },
+    });
+  }
+
+  private calculateOperationsKpi(
+    sessions: DashboardSession[],
+    period: PeriodRange,
+    totalTables: number,
+  ): OperationsKpi {
+    const completedDurations: number[] = [];
+
+    for (const session of sessions) {
+      if (session.seatedAt === null) {
+        continue;
+      }
+
+      const endAt = this.resolveSessionEndAt(session.checkedOutAt, session.closedAt);
+      if (endAt === null || endAt <= session.seatedAt) {
+        continue;
+      }
+
+      if (endAt < period.startUtc || endAt >= period.endUtc) {
+        continue;
+      }
+
+      completedDurations.push((endAt.getTime() - session.seatedAt.getTime()) / (60 * 1000));
+    }
+
+    const averageStayMinutes =
+      completedDurations.length === 0
+        ? 0
+        : completedDurations.reduce((sum, duration) => sum + duration, 0) /
+          completedDurations.length;
+    const tableTurnoverRate =
+      totalTables === 0 ? 0 : completedDurations.length / totalTables;
+
+    return {
+      averageStayMinutes: this.roundToTwoDecimals(averageStayMinutes),
+      tableTurnoverRate: this.roundToTwoDecimals(tableTurnoverRate),
+    };
+  }
+
   private toSessionRange(
     seatedAt: Date | null,
     checkedOutAt: Date | null,
@@ -99,12 +153,19 @@ export class BusinessDashboardService {
       return null;
     }
 
-    const endAt = checkedOutAt ?? closedAt;
+    const endAt = this.resolveSessionEndAt(checkedOutAt, closedAt);
     if (endAt === null || endAt <= seatedAt) {
       return null;
     }
 
     return { start: seatedAt, end: endAt };
+  }
+
+  private resolveSessionEndAt(
+    checkedOutAt: Date | null,
+    closedAt: Date | null,
+  ): Date | null {
+    return checkedOutAt ?? closedAt;
   }
 
   private resolvePeriod(query: BusinessDashboardQueryDto): PeriodRange {

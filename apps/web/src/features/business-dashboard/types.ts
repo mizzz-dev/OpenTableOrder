@@ -4,10 +4,16 @@ export interface HourlySeatOccupancy {
   seatOccupancyRate: number;
 }
 
+export interface OperationsKpi {
+  averageStayMinutes: number;
+  tableTurnoverRate: number;
+}
+
 export interface BusinessDashboardResponse {
   storeId: string;
   date: string;
   hourlySeatOccupancyRate: HourlySeatOccupancy[];
+  operationsKpi: OperationsKpi;
 }
 
 export interface BusinessDashboardQuery {
